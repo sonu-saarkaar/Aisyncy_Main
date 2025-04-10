@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aisyncy Recharge - Admin Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        :root {
+            --primary-color: #0d6efd;
+            --secondary-color: #6c757d;
+            --success-color: #198754;
+            --danger-color: #dc3545;
+            --warning-color: #ffc107;
+            --info-color: #0dcaf0;
+            --light-color: #f8f9fa;
+            --dark-color: #212529;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f5f5f5;
+        }
+
+        .sidebar {
+            height: 100vh;
+            background-color: #ffffff;
+            border-right: 1px solid #e0e0e0;
+            padding: 20px 0;
+            position: fixed;
+            width: 250px;
+            overflow-y: auto;
+        }
+
+        .sidebar .nav-link {
+            color: #333;
+            padding: 12px 20px;
+            margin: 4px 0;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .sidebar .nav-link:hover {
+            background-color: #f0f0f0;
+            color: var(--primary-color);
+        }
+
+        .sidebar .nav-link.active {
+            background-color: #e3f2fd;
+            color: var(--primary-color);
+        }
+
+        .sidebar .nav-link i {
+            width: 24px;
+            text-align: center;
+            margin-right: 10px;
+        }
+
+        .main-content {
+            margin-left: 250px;
+            padding: 20px;
+        }
+
+        .chat-container {
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            height: calc(100vh - 40px);
+            display: flex;
+            overflow: hidden;
+        }
+
+        .users-list {
+            width: 300px;
+            border-right: 1px solid #e0e0e0;
+            overflow-y: auto;
+        }
+
+        .users-list-header {
+            padding: 15px;
+            border-bottom: 1px solid #e0e0e0;
+            background: #f8f9fa;
+        }
+
+        .search-box {
+            padding: 10px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .search-box input {
+            border-radius: 20px;
+            padding: 8px 15px;
+            border: 1px solid #e0e0e0;
+            width: 100%;
+        }
+
+        .user-item {
+            padding: 15px;
+            border-bottom: 1px solid #e0e0e0;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .user-item:hover {
+            background-color: #f8f9fa;
+        }
+
+        .user-item.active {
+            background-color: #e3f2fd;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: var(--primary-color);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+
+        .user-info {
+            margin-left: 10px;
+        }
+
+        .user-name {
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+
+        .user-message {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .chat-window {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-header {
+            padding: 15px;
+            border-bottom: 1px solid #e0e0e0;
+            background: #f8f9fa;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            max-width: 70%;
+            position: relative;
+        }
+
+        .message.incoming {
+            margin-right: auto;
+        }
+
+        .message.outgoing {
+            margin-left: auto;
+        }
+
+        .message-content {
+            padding: 10px 15px;
+            border-radius: 15px;
+            position: relative;
+        }
+
+        .message.incoming .message-content {
+            background-color: white;
+            border-bottom-left-radius: 5px;
+        }
+
+        .message.outgoing .message-content {
+            background-color: var(--primary-color);
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+
+        .message-time {
+            font-size: 0.8em;
+            color: #999;
+            margin-top: 5px;
+        }
+
+        .chat-input {
+            padding: 15px;
+            border-top: 1px solid #e0e0e0;
+            background: white;
+        }
+
+        .message-form {
+            display: flex;
+            gap: 10px;
+        }
+
+        .message-form input {
+            flex-grow: 1;
+            border: 1px solid #e0e0e0;
+            border-radius: 20px;
+            padding: 8px 15px;
+        }
+
+        .message-form button {
+            border-radius: 20px;
+            padding: 8px 20px;
+        }
+
+        .quick-actions {
+            width: 250px;
+            border-left: 1px solid #e0e0e0;
+            padding: 20px;
+            background: white;
+        }
+
+        .quick-actions h5 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .quick-reply-btn {
+            margin-bottom: 10px;
+            width: 100%;
+            text-align: left;
+            border-radius: 8px;
+            padding: 8px 15px;
+            transition: all 0.2s;
+        }
+
+        .quick-reply-btn:hover {
+            background-color: #f0f0f0;
+        }
+
+        .status-badge {
+            font-size: 0.8em;
+            padding: 4px 8px;
+            border-radius: 12px;
+        }
+
+        .status-badge.active {
+            background-color: #e8f5e9;
+            color: var(--success-color);
+        }
+
+        .status-badge.inactive {
+            background-color: #f5f5f5;
+            color: var(--secondary-color);
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-2 sidebar">
+                <h4 class="text-center mb-4">Aisyncy Admin</h4>
+                <nav class="nav flex-column">
+                    <a class="nav-link active" href="#">
+                        <i class="fas fa-comments"></i>Inbox
+                    </a>
+                    <a class="nav-link" href="#">
+                        <i class="fas fa-history"></i>User Logs
+                    </a>
+                    <a class="nav-link" href="#">
+                        <i class="fas fa-clock"></i>Pending Recharges
+                    </a>
+                    <a class="nav-link" href="#">
+                        <i class="fas fa-chart-bar"></i>Analytics
+                    </a>
+                    <a class="nav-link" href="#">
+                        <i class="fas fa-cog"></i>Settings
+                    </a>
+                    <a class="nav-link" href="{{ url_for('admin_logout') }}">
+                        <i class="fas fa-sign-out-alt"></i>Logout
+                    </a>
+                </nav>
+            </div>
+
+            <!-- Main Content -->
+            <div class="col-md-10 main-content">
+                <div class="chat-container">
+                    <!-- Users List -->
+                    <div class="users-list">
+                        <div class="users-list-header">
+                            <h5 class="mb-0">Conversations</h5>
+                        </div>
+                        <div class="search-box">
+                            <input type="text" placeholder="Search users..." class="form-control">
+                        </div>
+                        <div id="users-list">
+                            <!-- Users will be loaded here dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Chat Window -->
+                    <div class="chat-window">
+                        <div class="chat-header">
+                            <div class="d-flex align-items-center">
+                                <div class="user-avatar me-2">
+                                    <i class="fas fa-user"></i>
+                                </div>
+                                <div>
+                                    <h5 class="mb-0" id="current-user">Select a user to start chatting</h5>
+                                    <small class="text-muted" id="user-status"></small>
+                                </div>
+                            </div>
+                            <div class="dropdown">
+                                <button class="btn btn-link" type="button" data-bs-toggle="dropdown">
+                                    <i class="fas fa-ellipsis-v"></i>
+                                </button>
+                                <ul class="dropdown-menu">
+                                    <li><a class="dropdown-item" href="#"><i class="fas fa-user me-2"></i>View Profile</a></li>
+                                    <li><a class="dropdown-item" href="#"><i class="fas fa-history me-2"></i>View History</a></li>
+                                    <li><a class="dropdown-item" href="#"><i class="fas fa-ban me-2"></i>Block User</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="chat-messages" id="chat-messages">
+                            <!-- Messages will be loaded here dynamically -->
+                        </div>
+                        <div class="chat-input">
+                            <form id="message-form" class="message-form">
+                                <input type="text" placeholder="Type your message..." class="form-control">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Quick Actions -->
+                    <div class="quick-actions">
+                        <h5>Quick Actions</h5>
+                        <button class="btn btn-outline-primary quick-reply-btn">
+                            <i class="fas fa-check-circle me-2"></i>Recharge Started
+                        </button>
+                        <button class="btn btn-outline-success quick-reply-btn">
+                            <i class="fas fa-money-bill-wave me-2"></i>Payment Received
+                        </button>
+                        <button class="btn btn-outline-danger quick-reply-btn">
+                            <i class="fas fa-times-circle me-2"></i>Payment Failed
+                        </button>
+                        <hr>
+                        <h5>Recharge Actions</h5>
+                        <button class="btn btn-primary w-100 mb-2">
+                            <i class="fas fa-play me-2"></i>Trigger Recharge
+                        </button>
+                        <button class="btn btn-danger w-100">
+                            <i class="fas fa-stop me-2"></i>Cancel Recharge
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // WebSocket connection for real-time updates
+        const socket = io();
+        
+        socket.on('connect', () => {
+            console.log('Connected to WebSocket server');
+            socket.emit('get_user_list');
+        });
+
+        socket.on('user_list', (users) => {
+            updateUsersList(users);
+        });
+
+        socket.on('message', (data) => {
+            if (data.phone_number === document.getElementById('current-user').textContent) {
+                appendMessage({
+                    text: data.message,
+                    direction: data.direction,
+                    timestamp: new Date().toLocaleTimeString()
+                });
+            }
+        });
+
+        // Handle message form submission
+        document.getElementById('message-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const input = this.querySelector('input');
+            const message = input.value.trim();
+            if (message) {
+                sendMessage(message);
+                input.value = '';
+            }
+        });
+
+        // Add message input validation
+        document.querySelector('#message-form input').addEventListener('input', function(e) {
+            const submitButton = document.querySelector('#message-form button');
+            submitButton.disabled = !this.value.trim();
+        });
+
+        // Handle quick reply buttons
+        document.querySelectorAll('.quick-reply-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const message = this.textContent.trim();
+                sendMessage(message);
+            });
+        });
+
+        function appendMessage(message) {
+            const messagesDiv = document.getElementById('chat-messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${message.direction}`;
+            messageDiv.innerHTML = `
+                <div class="message-content">
+                    ${message.text}
+                </div>
+                <div class="message-time">
+                    ${message.timestamp}
+                </div>
+            `;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function updateUsersList(users) {
+            const usersList = document.getElementById('users-list');
+            usersList.innerHTML = users.map(user => `
+                <div class="user-item" data-phone="${user.phone_number}">
+                    <div class="d-flex align-items-center">
+                        <div class="user-avatar">
+                            ${user.phone_number.slice(-1)}
+                        </div>
+                        <div class="user-info">
+                            <div class="user-name">${user.phone_number}</div>
+                            <div class="user-message">Last active: ${user.last_active}</div>
+                        </div>
+                        <div class="ms-auto">
+                            <span class="status-badge ${user.status}">
+                                ${user.status}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            // Add click handlers
+            document.querySelectorAll('.user-item').forEach(item => {
+                item.addEventListener('click', function() {
+                    document.querySelectorAll('.user-item').forEach(i => i.classList.remove('active'));
+                    this.classList.add('active');
+                    loadUserChat(this.dataset.phone);
+                });
+            });
+        }
+
+        function loadUserChat(phoneNumber) {
+            // Show loading state
+            const messagesDiv = document.getElementById('chat-messages');
+            messagesDiv.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading messages...</div>';
+            
+            fetch(`/api/chat/${phoneNumber}`)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('current-user').textContent = phoneNumber;
+                    document.getElementById('user-status').textContent = 'Online';
+                    messagesDiv.innerHTML = '';
+                    if (data.messages && data.messages.length > 0) {
+                        data.messages.forEach(message => appendMessage(message));
+                    } else {
+                        messagesDiv.innerHTML = '<div class="text-center text-muted">No messages yet</div>';
+                    }
+                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                })
+                .catch(error => {
+                    console.error('Error loading chat:', error);
+                    messagesDiv.innerHTML = '<div class="text-center text-danger">Error loading messages</div>';
+                });
+        }
+
+        function sendMessage(message) {
+            const currentUser = document.getElementById('current-user').textContent;
+            if (currentUser === 'Select a user to start chatting') {
+                alert('Please select a user first');
+                return;
+            }
+
+            // Show loading state
+            const submitButton = document.querySelector('#message-form button');
+            const originalText = submitButton.innerHTML;
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+            fetch('/api/send-manual-message', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    phone_number: currentUser,
+                    message: message
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Failed to send message: ' + data.error);
+                } else {
+                    // Add message to chat window immediately
+                    appendMessage({
+                        text: message,
+                        direction: 'outgoing',
+                        timestamp: new Date().toLocaleTimeString()
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error sending message:', error);
+                alert('Error sending message. Please try again.');
+            })
+            .finally(() => {
+                // Restore button state
+                submitButton.disabled = false;
+                submitButton.innerHTML = originalText;
+            });
+        }
+    </script>
+</body>
+</html>

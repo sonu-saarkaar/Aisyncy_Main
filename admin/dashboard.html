@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="messages">
+        <h2>Messages</h2>
+        <div id="message-list"></div>
+    </div>
+
+    <script>
+        fetch('/admin/messages')
+            .then(response => response.json())
+            .then(messages => {
+                const messageList = document.getElementById('message-list');
+                messages.forEach(msg => {
+                    const div = document.createElement('div');
+                    div.className = 'message-item';
+                    div.innerHTML = `
+                        <h3>From: ${msg.sender}</h3>
+                        <p>${msg.message}</p>
+                        <p>Status: ${msg.status}</p>
+                        <textarea id="reply-${msg.id}" placeholder="Write your reply"></textarea>
+                        <button onclick="sendReply(${msg.id})">Send Reply</button>
+                    `;
+                    messageList.appendChild(div);
+                });
+            });
+
+        function sendReply(messageId) {
+            const reply = document.getElementById(`reply-${messageId}`).value;
+            fetch('/admin/reply', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ messageId, reply })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Reply sent successfully');
+                }
+            });
+        }
+    </script>
+</body>
+</html>
