@@ -95,7 +95,10 @@ except Exception as e:
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def catch_all(path):
-    return app.handle_request(request)
+    try:
+        return app.handle_request(request)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 def send_whatsapp_message(phone_number, message):
     url = f"https://graph.facebook.com/v17.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
