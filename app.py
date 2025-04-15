@@ -96,8 +96,10 @@ except Exception as e:
 @app.route('/<path:path>')
 def catch_all(path):
     try:
+        logger.info(f"Handling request for path: {path}")
         return app.handle_request(request)
     except Exception as e:
+        logger.error(f"Error handling request: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 def send_whatsapp_message(phone_number, message):
