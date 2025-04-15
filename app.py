@@ -92,9 +92,10 @@ try:
 except Exception as e:
     logging.error(f"Failed to connect to MongoDB: {str(e)}")
 
-@app.route('/')
-def home():
-    return render_template('index.html')
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def catch_all(path):
+    return app.handle_request(request)
 
 def send_whatsapp_message(phone_number, message):
     url = f"https://graph.facebook.com/v17.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"

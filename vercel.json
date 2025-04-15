@@ -3,11 +3,19 @@
     "builds": [
         {
             "src": "wsgi.py",
-            "use": "@vercel/python"
-        },
-        {
-            "src": "static/**",
-            "use": "@vercel/static"
+            "use": "@vercel/python",
+            "config": {
+                "pythonVersion": "3.9",
+                "maxLambdaSize": "50mb",
+                "includeFiles": [
+                    "app.py",
+                    "templates/**",
+                    "static/**",
+                    "src/**",
+                    "chatflow/**",
+                    "forms.py"
+                ]
+            }
         }
     ],
     "routes": [
@@ -22,6 +30,8 @@
     ],
     "env": {
         "FLASK_APP": "wsgi.py",
-        "FLASK_ENV": "production"
+        "FLASK_ENV": "production",
+        "PYTHONPATH": ".",
+        "PORT": "5000"
     }
 } 
