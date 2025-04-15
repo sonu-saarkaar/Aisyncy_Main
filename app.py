@@ -4,7 +4,7 @@ import os
 # Add the 'src' directory to the Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
-from flask import Flask, request, Response, jsonify, render_template, session, redirect, url_for
+from flask import Flask, request, Response, jsonify, render_template, session, redirect, url_for, flash
 import requests
 import logging
 import json
@@ -14,11 +14,13 @@ from functools import wraps
 from datetime import datetime, timedelta
 import os
 try:
-    from src.chatflow.ChatFlowController import RechargeController  # type: ignore
+    from src.chatflow.ChatFlowController import RechargeController, ChatFlowController  # type: ignore 
     recharge_controller = RechargeController()  # Initialize RechargeController
+    chat_controller = ChatFlowController()
 except ModuleNotFoundError:
     logging.error("Module 'ChatFlowController' could not be imported. Ensure it exists in 'src/chatflow'.")
     recharge_controller = None  # Set to None to avoid runtime errors
+    chat_controller = None
 try:
     from src.error_handler import register_error_handlers  # Adjusted import for error_handler
 except ImportError:
@@ -36,6 +38,7 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField
 from wtforms.validators import DataRequired
 from flask_socketio import SocketIO, emit
+from forms import LoginForm
 
 # Load environment variables
 load_dotenv()
@@ -50,10 +53,36 @@ logging.info(f"WhatsApp Access Token configured: {WHATSAPP_ACCESS_TOKEN is not N
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['WTF_CSRF_ENABLED'] = True
+app.config['WTF_CSRF_SECRET_KEY'] = os.urandom(24)
+app.config['WTF_CSRF_TIME_LIMIT'] = 3600  # 1 hour
+
 logging.basicConfig(level=LOG_LEVEL)
 VERIFY_TOKEN = "12345"
 
 csrf = CSRFProtect(app)
+csrf.init_app(app)
+
+# Initialize SocketIO with CSRF protection
+socketio = SocketIO(app, cors_allowed_origins="*", manage_session=False)
+
+# Add CSRF token to all responses
+@app.after_request
+def add_csrf_token(response):
+    # Get the CSRF token from the session
+    token = session.get('csrf_token')
+    if token:
+        response.headers['X-CSRFToken'] = token
+    return response
+
+# Generate CSRF token for each session
+@app.before_request
+def generate_csrf_token():
+    if 'csrf_token' not in session:
+        session['csrf_token'] = os.urandom(24).hex()
 
 # MongoDB Connection
 try:
@@ -63,12 +92,9 @@ try:
 except Exception as e:
     logging.error(f"Failed to connect to MongoDB: {str(e)}")
 
-# Initialize SocketIO
-socketio = SocketIO(app, cors_allowed_origins="*")
-
 @app.route('/')
 def home():
-    return "Server is running!"
+    return render_template('index.html')
 
 def send_whatsapp_message(phone_number, message):
     url = f"https://graph.facebook.com/v17.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
@@ -129,9 +155,57 @@ def webhook():
                             else:
                                 message_body = ''
                             
+                            # Store incoming message
+                            db.messages.insert_one({
+                                'phone_number': phone_number,
+                                'message': message_body,
+                                'direction': 'incoming',
+                                'timestamp': datetime.utcnow()
+                            })
+                            
+                            # Update user's last active time
+                            db.users.update_one(
+                                {'phone_number': phone_number},
+                                {
+                                    '$set': {'last_active': datetime.utcnow()},
+                                    '$setOnInsert': {'phone_number': phone_number}
+                                },
+                                upsert=True
+                            )
+                            
+                            # Emit to WebSocket
+                            socketio.emit('new_message', {
+                                'phone_number': phone_number,
+                                'text': message_body,
+                                'direction': 'incoming',
+                                'timestamp': datetime.utcnow().isoformat(),
+                                'time': datetime.utcnow().strftime('%I:%M %p'),
+                                'date': datetime.utcnow().strftime('%d/%m/%Y')
+                            })
+                            
+                            # Process message and get response
                             response_message = recharge_controller.process_recharge(phone_number, message_body)
                             
                             if response_message:
+                                # Store bot response
+                                db.messages.insert_one({
+                                    'phone_number': phone_number,
+                                    'message': response_message,
+                                    'direction': 'bot',
+                                    'timestamp': datetime.utcnow()
+                                })
+                                
+                                # Emit bot response
+                                socketio.emit('new_message', {
+                                    'phone_number': phone_number,
+                                    'text': response_message,
+                                    'direction': 'bot',
+                                    'timestamp': datetime.utcnow().isoformat(),
+                                    'time': datetime.utcnow().strftime('%I:%M %p'),
+                                    'date': datetime.utcnow().strftime('%d/%m/%Y')
+                                })
+                                
+                                # Send response via WhatsApp
                                 send_whatsapp_message(phone_number, response_message)
                             
                             return "OK", 200
@@ -145,23 +219,22 @@ def webhook():
 # Add CSRF exemption after the webhook function is defined
 csrf.exempt(webhook)  # Exempt webhook from CSRF
 
-class LoginForm(FlaskForm):
-    username = StringField('Username', validators=[DataRequired()])
-    password = PasswordField('Password', validators=[DataRequired()])
-
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
+    form = LoginForm()
+    if form.validate_on_submit():
+        username = form.username.data
+        password = form.password.data
         
-        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+        # Replace with your actual authentication logic
+        if username == "admin" and password == "admin123":
             session['admin_logged_in'] = True
+            flash('Login successful!', 'success')
             return redirect(url_for('admin_dashboard'))
-            
-        return render_template('admin_login.html', error="Invalid credentials")
+        else:
+            flash('Invalid username or password', 'danger')
     
-    return render_template('admin_login.html')
+    return render_template('admin_login.html', form=form)
 
 @app.route('/admin/logout')
 def admin_logout():
@@ -186,7 +259,96 @@ def handle_connect():
 
 @socketio.on('get_user_list')
 def handle_get_user_list():
+    if not session.get('admin_logged_in'):
+        return False
     emit('user_list', get_active_users())
+
+@socketio.on('admin_message')
+def handle_admin_message(data):
+    if not session.get('admin_logged_in'):
+        return False
+    try:
+        phone_number = data.get('phone_number')
+        message = data.get('text')
+        
+        if not phone_number or not message:
+            return
+            
+        # Send message via WhatsApp
+        success = send_whatsapp_message(phone_number, message)
+        
+        if success:
+            # Store message in database
+            db.messages.insert_one({
+                'phone_number': phone_number,
+                'message': message,
+                'direction': 'outgoing',
+                'timestamp': datetime.utcnow()
+            })
+            
+            # Update user's last active time
+            db.users.update_one(
+                {'phone_number': phone_number},
+                {
+                    '$set': {'last_active': datetime.utcnow()},
+                    '$setOnInsert': {'phone_number': phone_number}
+                },
+                upsert=True
+            )
+            
+            # Emit to WebSocket
+            socketio.emit('new_message', {
+                'phone_number': phone_number,
+                'text': message,
+                'direction': 'outgoing',
+                'timestamp': datetime.utcnow().isoformat(),
+                'time': datetime.utcnow().strftime('%I:%M %p'),
+                'date': datetime.utcnow().strftime('%d/%m/%Y')
+            })
+            
+    except Exception as e:
+        logging.error(f"Error handling admin message: {str(e)}")
+
+@socketio.on('message')
+def handle_message(data):
+    try:
+        phone_number = data.get('phone_number')
+        message = data.get('message')
+        direction = data.get('direction', 'incoming')
+        
+        if not phone_number or not message:
+            return
+            
+        # Store message in database
+        db.messages.insert_one({
+            'phone_number': phone_number,
+            'message': message,
+            'direction': direction,
+            'timestamp': datetime.utcnow()
+        })
+        
+        # Update user's last active time
+        db.users.update_one(
+            {'phone_number': phone_number},
+            {
+                '$set': {'last_active': datetime.utcnow()},
+                '$setOnInsert': {'phone_number': phone_number}
+            },
+            upsert=True
+        )
+        
+        # Emit to WebSocket
+        socketio.emit('new_message', {
+            'phone_number': phone_number,
+            'text': message,
+            'direction': direction,
+            'timestamp': datetime.utcnow().isoformat(),
+            'time': datetime.utcnow().strftime('%I:%M %p'),
+            'date': datetime.utcnow().strftime('%d/%m/%Y')
+        })
+        
+    except Exception as e:
+        logging.error(f"Error handling message: {str(e)}")
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -194,20 +356,31 @@ def handle_disconnect():
 
 def get_active_users():
     try:
-        # Get users who have interacted in the last 24 hours
-        recent_users = db.messages.find({
-            'timestamp': {'$gte': datetime.utcnow() - timedelta(days=1)}
-        }).distinct('phone_number')
+        # Get users with recent messages
+        users = list(db.messages.aggregate([
+            {
+                '$group': {
+                    '_id': '$phone_number',
+                    'last_message': {'$last': '$message'},
+                    'last_active': {'$last': '$timestamp'},
+                    'status': {'$last': '$direction'}
+                }
+            },
+            {
+                '$project': {
+                    'phone_number': '$_id',
+                    'last_message': 1,
+                    'last_active': 1,
+                    'status': 1
+                }
+            }
+        ]))
         
-        users = []
-        for phone in recent_users:
-            user = db.users.find_one({'phone_number': phone})
-            if user:
-                users.append({
-                    'phone_number': phone,
-                    'last_active': user.get('last_active', '').strftime('%Y-%m-%d %H:%M'),
-                    'status': 'active' if user.get('last_active') > datetime.utcnow() - timedelta(hours=1) else 'inactive'
-                })
+        # Format the data
+        for user in users:
+            user['status'] = 'online' if (datetime.utcnow() - user['last_active']).total_seconds() < 300 else 'offline'
+            user['last_active'] = user['last_active'].strftime('%Y-%m-%d %H:%M:%S')
+            
         return users
     except Exception as e:
         logging.error(f"Error getting active users: {str(e)}")
@@ -217,7 +390,10 @@ def get_active_users():
 @app.route('/admin/dashboard')
 @admin_required
 def admin_dashboard():
-    return render_template('dashboard.html')
+    if not session.get('admin_logged_in'):
+        flash('Please login first', 'warning')
+        return redirect(url_for('admin_login'))
+    return render_template('admin_dashboard.html')
 
 @app.route('/admin/user/<phone_number>')
 @admin_required
@@ -260,16 +436,30 @@ def user_details(phone_number):
 def get_chat_history(phone_number):
     try:
         messages = list(db.messages.find(
-            {'phone_number': phone_number}
+            {'phone_number': phone_number},
+            {'_id': 0, 'phone_number': 0}
         ).sort('timestamp', 1))
         
-        return jsonify({
-            'messages': [{
+        # Format messages for WhatsApp-like display
+        formatted_messages = []
+        for msg in messages:
+            # Determine message direction
+            if msg['direction'] == 'outgoing':
+                direction = 'outgoing'
+            elif msg['direction'] == 'bot':
+                direction = 'incoming'  # Bot messages appear as incoming
+            else:
+                direction = msg['direction']
+            
+            formatted_messages.append({
                 'text': msg['message'],
-                'direction': msg['direction'],
-                'timestamp': msg['timestamp'].strftime('%Y-%m-%d %H:%M')
-            } for msg in messages]
-        })
+                'direction': direction,
+                'timestamp': msg['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
+                'time': msg['timestamp'].strftime('%I:%M %p'),
+                'date': msg['timestamp'].strftime('%d/%m/%Y')
+            })
+        
+        return jsonify({'messages': formatted_messages})
     except Exception as e:
         logging.error(f"Error getting chat history: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500
@@ -491,6 +681,22 @@ def send_manual_message():
     except Exception as e:
         logging.error(f"Error sending manual message: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    user_message = request.json.get('message')
+    response = chat_controller.process_message(user_message)
+    return jsonify({'response': response})
+
+@app.route('/api/users')
+@admin_required
+def get_users():
+    try:
+        users = get_active_users()
+        return jsonify({'users': users})
+    except Exception as e:
+        logging.error(f"Error getting users: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 # Update the main run statement to use socketio
 if __name__ == '__main__':

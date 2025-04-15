@@ -371,50 +371,101 @@
     <script>
         // WebSocket connection for real-time updates
         const socket = io();
+        let currentUser = null;
         
         socket.on('connect', () => {
             console.log('Connected to WebSocket server');
-            socket.emit('get_user_list');
+            loadUsers();
         });
 
         socket.on('user_list', (users) => {
             updateUsersList(users);
         });
 
-        socket.on('message', (data) => {
-            if (data.phone_number === document.getElementById('current-user').textContent) {
+        socket.on('new_message', (data) => {
+            console.log('New message received:', data);
+            if (currentUser && data.phone_number === currentUser) {
                 appendMessage({
                     text: data.message,
-                    direction: data.direction,
+                    direction: 'incoming',
                     timestamp: new Date().toLocaleTimeString()
                 });
             }
+            updateUserLastMessage(data.phone_number, data.message);
         });
+
+        function loadUsers() {
+            fetch('/api/users')
+                .then(response => response.json())
+                .then(users => {
+                    updateUsersList(users);
+                })
+                .catch(error => console.error('Error loading users:', error));
+        }
+
+        function updateUserLastMessage(phoneNumber, message) {
+            const userItem = document.querySelector(`.user-item[data-phone="${phoneNumber}"]`);
+            if (userItem) {
+                const messageDiv = userItem.querySelector('.user-message');
+                if (messageDiv) {
+                    messageDiv.textContent = message;
+                }
+            }
+        }
 
         // Handle message form submission
         document.getElementById('message-form').addEventListener('submit', function(e) {
             e.preventDefault();
             const input = this.querySelector('input');
             const message = input.value.trim();
-            if (message) {
+            if (message && currentUser) {
                 sendMessage(message);
                 input.value = '';
             }
         });
 
-        // Add message input validation
-        document.querySelector('#message-form input').addEventListener('input', function(e) {
-            const submitButton = document.querySelector('#message-form button');
-            submitButton.disabled = !this.value.trim();
-        });
+        function sendMessage(message) {
+            if (!currentUser) {
+                alert('Please select a user first');
+                return;
+            }
 
-        // Handle quick reply buttons
-        document.querySelectorAll('.quick-reply-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const message = this.textContent.trim();
-                sendMessage(message);
+            const submitButton = document.querySelector('#message-form button');
+            const originalText = submitButton.innerHTML;
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+            fetch('/api/send-manual-message', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    phone_number: currentUser,
+                    message: message
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Failed to send message: ' + data.error);
+                } else {
+                    appendMessage({
+                        text: message,
+                        direction: 'outgoing',
+                        timestamp: new Date().toLocaleTimeString()
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error sending message:', error);
+                alert('Error sending message. Please try again.');
+            })
+            .finally(() => {
+                submitButton.disabled = false;
+                submitButton.innerHTML = originalText;
             });
-        });
+        }
 
         function appendMessage(message) {
             const messagesDiv = document.getElementById('chat-messages');
@@ -442,7 +493,7 @@
                         </div>
                         <div class="user-info">
                             <div class="user-name">${user.phone_number}</div>
-                            <div class="user-message">Last active: ${user.last_active}</div>
+                            <div class="user-message">${user.last_message || 'No messages yet'}</div>
                         </div>
                         <div class="ms-auto">
                             <span class="status-badge ${user.status}">
@@ -458,13 +509,13 @@
                 item.addEventListener('click', function() {
                     document.querySelectorAll('.user-item').forEach(i => i.classList.remove('active'));
                     this.classList.add('active');
-                    loadUserChat(this.dataset.phone);
+                    currentUser = this.dataset.phone;
+                    loadUserChat(currentUser);
                 });
             });
         }
 
         function loadUserChat(phoneNumber) {
-            // Show loading state
             const messagesDiv = document.getElementById('chat-messages');
             messagesDiv.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading messages...</div>';
             
@@ -487,52 +538,9 @@
                 });
         }
 
-        function sendMessage(message) {
-            const currentUser = document.getElementById('current-user').textContent;
-            if (currentUser === 'Select a user to start chatting') {
-                alert('Please select a user first');
-                return;
-            }
-
-            // Show loading state
-            const submitButton = document.querySelector('#message-form button');
-            const originalText = submitButton.innerHTML;
-            submitButton.disabled = true;
-            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-
-            fetch('/api/send-manual-message', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    phone_number: currentUser,
-                    message: message
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    alert('Failed to send message: ' + data.error);
-                } else {
-                    // Add message to chat window immediately
-                    appendMessage({
-                        text: message,
-                        direction: 'outgoing',
-                        timestamp: new Date().toLocaleTimeString()
-                    });
-                }
-            })
-            .catch(error => {
-                console.error('Error sending message:', error);
-                alert('Error sending message. Please try again.');
-            })
-            .finally(() => {
-                // Restore button state
-                submitButton.disabled = false;
-                submitButton.innerHTML = originalText;
-            });
-        }
+        // Initial load
+        loadUsers();
+        setInterval(loadUsers, 30000); // Refresh user list every 30 seconds
     </script>
 </body>
 </html>
