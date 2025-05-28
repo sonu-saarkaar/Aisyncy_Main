@@ -1,0 +1,74 @@
+# Python compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environment and local config
+.env
+.venv
+venv/
+ENV/
+.idea/
+.vscode/
+
+# Git related
+.git
+.gitignore
+
+# Node.js related (if any)
+node_modules/
+
+# Testing
+.pytest_cache/
+.coverage
+
+# Others
+*.log
+*.jpg
+*.png
+.DS_Store
+
+# Additional changes from the code block
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+README.md
+*.md
+test/
+tests/
+docs/ 
